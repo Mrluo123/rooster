@@ -3,6 +3,7 @@ from sympy import *
 
 import datetime
 import json
+import math
 import os
 import shutil
 import sys
@@ -13,221 +14,276 @@ class Control:
     # constructor: self is a 'control' object created in B
     def __init__(self, reactor):
         self.input = self.construct_input()
+        self.signal = {}
+        #self.evaluate_signals(reactor, self.input['t0'])
 
     #------------------------------------------------------------------------------------------
     def evaluate_signals(self, reactor, t):
 
         # evaluate signals
-        self.signal = {}
         for s in self.input['signal']:
-            self.signal[s['id']] = 0.0
 
-            # merge card values
-            value = ''.join([str(x) for x in s['value']])
-            # only for simple signals not requiring symbolic evaluations
-            if not any([char in value for char in ['+', '-', '*', '/']]):
-               # constant
-               if type(s['value'][0]) == int or type(s['value'][0]) == float:
-                   self.signal[s['id']] = s['value'][0]
-               
-               else:
-                   # time
-                   if s['value'][0] == 'time':
-                       self.signal[s['id']] = t
-                   
-                   # pipe density
-                   elif s['value'][0] == 'dens':
-                       id = s['value'][1]
-                       if 'fluid' in reactor.solve and id in reactor.fluid.pipeid:
-                           indx = [x.id for x in reactor.fluid.pipeid].index(id)
-                           if len(s['value']) == 2:
-                               # average density
-                               davg = 0.0
-                               for i in range(reactor.fluid.pipennodes[indx]):
-                                   # call material property function
-                                   pro = reactor.data.matpro( {'type':reactor.fluid.type[indx], 't':reactor.fluid.temp[indx][i]} )
-                                   davg += pro['rhol']
-                               davg /= reactor.fluid.pipennodes[indx]
-                               self.signal[s['id']] = davg
-                           else:
-                               # node density
-                               if s['value'][2] > reactor.fluid.pipennodes[indx]:
-                                   print('****ERROR: \'signal\' card ' + s['id'] + ' refers to node (' + str(int(s['value'][2])) + ') that does not exist in pipe ' + id)
-                                   sys.exit()
-                               # call material property function
-                               pro = reactor.data.matpro( {'type':reactor.fluid.type[indx], 't':reactor.fluid.temp[indx][int(s['value'][2])-1]} )
-                               self.signal[s['id']] = pro['rhol']
-                   
-                   # htstr or pipe temperature
-                   elif s['value'][0] == 'temp':
-                       id = s['value'][1]
-                       if 'fluid' in reactor.solve and id in reactor.fluid.pipeid:
-                           indx = [x.id for x in reactor.fluid.pipeid].index(id)
-                           if len(s['value']) == 2:
-                               # average temperature
-                               tavg = 0.0
-                               for i in range(reactor.fluid.pipennodes[indx]):
-                                   tavg += reactor.fluid.temp[indx][i]
-                               tavg /= reactor.fluid.pipennodes[indx]
-                               self.signal[s['id']] = tavg
-                           else:
-                               # node temperature
-                               if s['value'][2] > reactor.fluid.pipennodes[indx]:
-                                   print('****ERROR: \'signal\' card ' + s['id'] + ' refers to node (' + str(int(s['value'][2])) + ') that does not exist in pipe ' + id)
-                                   sys.exit()
-                               self.signal[s['id']] = reactor.fluid.temp[indx][int(s['value'][2])-1]
-                       elif 'htstr' in reactor.solve and id in [x.id for x in reactor.solid.htstr]:
-                           indx = [x.id for x in reactor.solid.htstr].index(id)
-                           if len(s['value']) == 2:
-                               # average temperature
-                               tavg = 0.0
-                               for i in range(reactor.solid.htstr[indx].nr):
-                                   tavg += reactor.solid.htstr[indx].temp[i] * reactor.solid.htstr[indx].vol[i]
-                               tavg /= sum(reactor.solid.htstr[indx].vol)
-                               self.signal[s['id']] = tavg
-                           else:
-                               # node temperature
-                               if s['value'][2] > reactor.solid.htstr[indx].nr:
-                                   print('****ERROR: \'signal\' card ' + s['id'] + ' refers to radial node (' + str(int(s['value'][2])) + ') that does not exist in htstr ' + id)
-                                   sys.exit()
-                               self.signal[s['id']] = reactor.solid.htstr[indx].temp[int(s['value'][2])-1]
-                   
-                   #fuel temperature
-                   elif s['value'][0] == 'tfuel':
-                       id = s['value'][1]
-                       if 'fuelrod' in reactor.solve and id in [x.id for x in reactor.solid.fuelrod]:
-                           indx = [x.id for x in reactor.solid.fuelrod].index(id)
-                           if len(s['value']) == 2:
-                               # r-z-average fuel temperature and volume
-                               tavg, vol = 0.0, 0.0
-                               for i in range(reactor.solid.fuelrod[indx].nz):
-                                   for j in range(reactor.solid.fuelrod[indx].fuel[i].nr):
-                                       tavg += reactor.solid.fuelrod[indx].fuel[i].temp[j] * reactor.solid.fuelrod[indx].fuel[i].vol[j]
-                                       vol += reactor.solid.fuelrod[indx].fuel[i].vol[j]
-                               tavg /= vol
-                               self.signal[s['id']] = tavg
-                           elif len(s['value']) == 3:
-                               if s['value'][2] > reactor.solid.fuelrod[indx].nz:
-                                   print('****ERROR: \'signal\' card ' + s['id'] + ' refers to axial layer (' + str(int(s['value'][2])) + ') that does not exist in fuelrod ' + id)
-                                   sys.exit()
-                               i = int(s['value'][2]-1)
-                               # r-average temperature and volume
-                               tavg, vol = 0.0, 0.0
-                               for j in range(reactor.solid.fuelrod[indx].fuel[i].nr):
-                                   tavg += reactor.solid.fuelrod[indx].fuel[i].temp[j] * reactor.solid.fuelrod[indx].fuel[i].vol[j]
-                                   vol += reactor.solid.fuelrod[indx].fuel[i].vol[j]
-                               tavg /= vol
-                               self.signal[s['id']] = tavg
-                           else:
-                               if s['value'][2] > reactor.solid.fuelrod[indx].nz:
-                                   print('****ERROR: \'signal\' card ' + s['id'] + ' refers to axial layer (' + str(int(s['value'][2])) + ') that does not exist in fuelrod ' + id)
-                                   sys.exit()
-                               i = int(s['value'][2]-1)
-                               if s['value'][3] > reactor.solid.fuelrod[indx].fuel[i].nr:
-                                   print('****ERROR: \'signal\' card ' + s['id'] + ' refers to radial (' + str(int(s['value'][3])) + ') that does not exist in fuel of fuelrod ' + id)
-                                   sys.exit()
-                               j = int(s['value'][3]-1)
-                               # node temperature
-                               self.signal[s['id']] = reactor.solid.fuelrod[indx].fuel[int(s['value'][2])-1].temp[j]
-                   
-                   elif s['value'][0] == 'tclad':
-                       id = s['value'][1]
-                       if 'fuelrod' in reactor.solve and id in [x.id for x in reactor.solid.fuelrod]:
-                           indx = [x.id for x in reactor.solid.fuelrod].index(id)
-                           if len(s['value']) == 2:
-                               # r-z-average clad temperature and volume
-                               tavg, vol = 0.0, 0.0
-                               for i in range(reactor.solid.fuelrod[indx].nz):
-                                   for j in range(reactor.solid.fuelrod[indx].clad[i].nr):
-                                       tavg += reactor.solid.fuelrod[indx].clad[i].temp[j] * reactor.solid.fuelrod[indx].clad[i].vol[j]
-                                       vol += reactor.solid.fuelrod[indx].clad[i].vol[j]
-                               tavg /= vol
-                               self.signal[s['id']] = tavg
-                           elif len(s['value']) == 3:
-                               if s['value'][2] > reactor.solid.fuelrod[indx].nz:
-                                   print('****ERROR: \'signal\' card ' + s['id'] + ' refers to axial layer (' + str(int(s['value'][2])) + ') that does not exist in fuelrod ' + id)
-                                   sys.exit()
-                               i = int(s['value'][2])
-                               # r-average temperature and volume
-                               tavg, vol = 0.0, 0.0
-                               for j in range(reactor.solid.fuelrod[indx].clad[i].nr):
-                                   tavg += reactor.solid.fuelrod[indx].clad[i].temp[j] * reactor.solid.fuelrod[indx].clad[i].vol[j]
-                                   vol += reactor.solid.fuelrod[indx].clad[i].vol[j]
-                               tavg /= vol
-                               self.signal[s['id']] = tavg
-                           else:
-                               if s['value'][2] > reactor.solid.fuelrod[indx].nz:
-                                   print('****ERROR: \'signal\' card ' + s['id'] + ' refers to axial layer (' + str(int(s['value'][2])) + ') that does not exist in fuelrod ' + id)
-                                   sys.exit()
-                               i = int(s['value'][2]-1)
-                               if s['value'][3] > reactor.solid.fuelrod[indx].clad[i].nr:
-                                   print('****ERROR: \'signal\' card ' + s['id'] + ' refers to radial (' + str(int(s['value'][3])) + ') that does not exist in fuel of fuelrod ' + id)
-                                   sys.exit()
-                               j = int(s['value'][3]-1)
-                               # node temperature
-                               self.signal[s['id']] = reactor.solid.fuelrod[indx].clad[int(s['value'][2])-1].temp[j]
+            # boolean
+            if s['type'] == 'boolean':
+                self.signal[s['id']] = False
+                if isinstance(s['value'][0], float) or isinstance(s['value'][0], int):
+                    sigid1 = s['value'][0]
+                else:
+                    sigid1 = self.signal[s['value'][0]]
+                if isinstance(s['value'][2], float) or isinstance(s['value'][2], int):
+                    sigid2 = s['value'][2]
+                else:
+                    sigid2 = self.signal[s['value'][2]]
+                operator = s['value'][1]
+                if operator == 'eq' and sigid1 == sigid2: self.signal[s['id']] = True
+                if operator == 'ne' and sigid1 != sigid2: self.signal[s['id']] = True
+                if operator == 'gt' and sigid1 > sigid2: self.signal[s['id']] = True
+                if operator == 'ge' and sigid1 >= sigid2: self.signal[s['id']] = True
+                if operator == 'lt' and sigid1 < sigid2: self.signal[s['id']] = True
+                if operator == 'le' and sigid1 <= sigid2: self.signal[s['id']] = True
 
-        #evaluate output signals of lookup tables
-        lookup_table = self.input['lookup']
-        for table in lookup_table:
-            insignal_name = table['x'][0]
-            outsignal_name = table['f(x)'][0]
-            x = table['x'][1:]
-            y = table['f(x)'][1:]
-            # scipy function
-            f = interp1d(x, y)
-            xnew = max(min(self.signal[insignal_name],x[-1]),x[0])
-            ynew = f(xnew)
-            self.signal[outsignal_name] = ynew
+            # constant: constant value
+            elif s['type'] == 'constant':
+                self.signal[s['id']] = s['value'][0]
+
+            # dens: pipe density
+            elif s['type'] == 'dens':
+                id = s['value'][0]
+                if 'fluid' in reactor.solve and id in reactor.fluid.pipeid:
+                    indx = reactor.fluid.pipeid.index(id)
+                    if len(s['value']) == 1:
+                        # average density
+                        davg = 0.0
+                        for i in range(reactor.fluid.pipennodes[indx]):
+                            # call material property function
+                            pro = reactor.data.matpro( {'type':reactor.fluid.type[indx], 't':reactor.fluid.temp[indx][i]} )
+                            davg += pro['rhol']
+                        davg /= reactor.fluid.pipennodes[indx]
+                        self.signal[s['id']] = davg
+                    else:
+                        # node density
+                        if s['value'][1] > reactor.fluid.pipennodes[indx]:
+                            print('****ERROR: \'signal\' card ' + s['id'] + ' refers to node (' + str(int(s['value'][1])) + ') that does not exist in pipe ' + id)
+                            sys.exit()
+                        # call material property function
+                        pro = reactor.data.matpro( {'type':reactor.fluid.type[indx], 't':reactor.fluid.temp[indx][int(s['value'][1])-1]} )
+                        self.signal[s['id']] = pro['rhol']
+                else:
+                    print('****ERROR: \'signal\' card ' + s['id'] + ' refers to pipe that does not exist or there is no \'solve fluid\' card.')
+                    sys.exit()
+
+            # formula: symbolic evaluations
+            elif s['type'] == 'formula':
+                # merge card values
+                value = ''.join([str(x) for x in s['value']])
+                # only for signals requiring symbolic evaluations
+                if any([char in value for char in ['+', '-', '*', '/']]):
+                    try:
+                        self.signal[s['id']] = sympify(value)
+                    except:
+                        print('****ERROR: \'signal\' card ' + s['id'] + ' contains a syntax error.')
+                        sys.exit()
+                    for id in list(self.signal.keys()):
+                        if id in value:
+                            self.signal[s['id']] = self.signal[s['id']].subs(sympify(id),self.signal[id])
+                    try:
+                        self.signal[s['id']] = float(self.signal[s['id']])
+                    except:
+                        print('****ERROR: \'signal\' card ' + s['id'] + ' most likely contains a not-defined signal.')
+                        sys.exit()
+
+            # function: analytical function
+            elif s['type'] == 'function':
+                function = s['value'][0]
+                id = s['value'][1]
+                if function == 'ln':
+                    if self.signal[id] <= 0:
+                        print('****ERROR: \'signal\' ' + s['id'] + ' fails to calculate natural logarythm of non-positive value.')
+                        sys.exit()
+                    self.signal[s['id']] = math.log(self.signal[id])
+
+            # if: conditional if
+            elif s['type'] == 'if':
+                if self.signal[s['value'][0]]:
+                    self.signal[s['id']] = self.signal[s['value'][1]]
+
+            # lookup: table
+            elif s['type'] == 'lookup':
+                x = []
+                y = []
+                for i in range(len(s['value'][1:])):
+                    if i % 2 == 0: 
+                        y.append(s['value'][i+1])
+                    else:
+                        x.append(s['value'][i+1])
+                # scipy function
+                f = interp1d(x, y)
+                id = s['value'][0]
+                xnew = max(min(self.signal[id],x[-1]),x[0])
+                self.signal[s['id']] = f(xnew)
+
+            # tclad: clad temperature
+            elif s['type'] == 'tclad':
+                id = s['value'][0]
+                if 'fuelrod' in reactor.solve and id in [x.id for x in reactor.solid.fuelrod]:
+                    indx = [x.id for x in reactor.solid.fuelrod].index(id)
+                    if len(s['value']) == 1:
+                        # r-z-average clad temperature and volume
+                        tavg, vol = 0.0, 0.0
+                        for i in range(reactor.solid.fuelrod[indx].nz):
+                            for j in range(reactor.solid.fuelrod[indx].clad[i].nr):
+                                tavg += reactor.solid.fuelrod[indx].clad[i].temp[j] * reactor.solid.fuelrod[indx].clad[i].vol[j]
+                                vol += reactor.solid.fuelrod[indx].clad[i].vol[j]
+                        tavg /= vol
+                        self.signal[s['id']] = tavg
+                    elif len(s['value']) == 2:
+                        if s['value'][1] > reactor.solid.fuelrod[indx].nz:
+                            print('****ERROR: \'signal\' card ' + s['id'] + ' refers to axial layer (' + str(int(s['value'][1])) + ') that does not exist in fuelrod ' + id)
+                            sys.exit()
+                        i = int(s['value'][1])
+                        # r-average temperature and volume
+                        tavg, vol = 0.0, 0.0
+                        for j in range(reactor.solid.fuelrod[indx].clad[i].nr):
+                            tavg += reactor.solid.fuelrod[indx].clad[i].temp[j] * reactor.solid.fuelrod[indx].clad[i].vol[j]
+                            vol += reactor.solid.fuelrod[indx].clad[i].vol[j]
+                        tavg /= vol
+                        self.signal[s['id']] = tavg
+                    else:
+                        if s['value'][1] > reactor.solid.fuelrod[indx].nz:
+                            print('****ERROR: \'signal\' card ' + s['id'] + ' refers to axial layer (' + str(int(s['value'][1])) + ') that does not exist in fuelrod ' + id)
+                            sys.exit()
+                        i = int(s['value'][1]-1)
+                        if s['value'][2] > reactor.solid.fuelrod[indx].clad[i].nr:
+                            print('****ERROR: \'signal\' card ' + s['id'] + ' refers to radial (' + str(int(s['value'][2])) + ') that does not exist in fuel of fuelrod ' + id)
+                            sys.exit()
+                        j = int(s['value'][2]-1)
+                        # node temperature
+                        self.signal[s['id']] = reactor.solid.fuelrod[indx].clad[int(s['value'][1])-1].temp[j]
+                else:
+                    print('****ERROR: \'signal\' card ' + s['id'] + ' refers to fuel rod (' + id + ') that does not exist or there is no \'solve fuelrod\' card.')
+                    sys.exit()
+
+            # temp: htstr or pipe temperature
+            elif s['type'] == 'temp':
+                id = s['value'][0]
+                if 'fluid' in reactor.solve and id in reactor.fluid.pipeid:
+                    indx = reactor.fluid.pipeid.index(id)
+                    if len(s['value']) == 1:
+                        # average temperature
+                        tavg = 0.0
+                        for i in range(reactor.fluid.pipennodes[indx]):
+                            tavg += reactor.fluid.temp[indx][i]
+                        tavg /= reactor.fluid.pipennodes[indx]
+                        self.signal[s['id']] = tavg
+                    else:
+                        # node temperature
+                        if s['value'][1] > reactor.fluid.pipennodes[indx]:
+                            print('****ERROR: \'signal\' card ' + s['id'] + ' refers to node (' + str(int(s['value'][1])) + ') that does not exist in pipe ' + id)
+                            sys.exit()
+                        self.signal[s['id']] = reactor.fluid.temp[indx][int(s['value'][1])-1]
+                elif 'htstr' in reactor.solve and id in [x.id for x in reactor.solid.htstr]:
+                    indx = [x.id for x in reactor.solid.htstr].index(id)
+                    if len(s['value']) == 1:
+                        # average temperature
+                        tavg = 0.0
+                        for i in range(reactor.solid.htstr[indx].nr):
+                            tavg += reactor.solid.htstr[indx].temp[i] * reactor.solid.htstr[indx].vol[i]
+                        tavg /= sum(reactor.solid.htstr[indx].vol)
+                        self.signal[s['id']] = tavg
+                    else:
+                        # node temperature
+                        if s['value'][1] > reactor.solid.htstr[indx].nr:
+                            print('****ERROR: \'signal\' card ' + s['id'] + ' refers to radial node (' + str(int(s['value'][1])) + ') that does not exist in htstr ' + id)
+                            sys.exit()
+                        self.signal[s['id']] = reactor.solid.htstr[indx].temp[int(s['value'][1])-1]
+                else:
+                    print('****ERROR: \'signal\' card ' + s['id'] + ' refers to heat structure or pipe that does not exist or there is no \'solve fluid\' card or \'solve htstr\' card.')
+                    sys.exit()
+
+            # tfuel: fuel temperature
+            elif s['type'] == 'tfuel':
+                id = s['value'][0]
+                if 'fuelrod' in reactor.solve and id in [x.id for x in reactor.solid.fuelrod]:
+                    indx = [x.id for x in reactor.solid.fuelrod].index(id)
+                    if len(s['value']) == 1:
+                        # r-z-average fuel temperature and volume
+                        tavg, vol = 0.0, 0.0
+                        for i in range(reactor.solid.fuelrod[indx].nz):
+                            for j in range(reactor.solid.fuelrod[indx].fuel[i].nr):
+                                tavg += reactor.solid.fuelrod[indx].fuel[i].temp[j] * reactor.solid.fuelrod[indx].fuel[i].vol[j]
+                                vol += reactor.solid.fuelrod[indx].fuel[i].vol[j]
+                        tavg /= vol
+                        self.signal[s['id']] = tavg
+                    elif len(s['value']) == 2:
+                        if s['value'][1] > reactor.solid.fuelrod[indx].nz:
+                            print('****ERROR: \'signal\' card ' + s['id'] + ' refers to axial layer (' + str(int(s['value'][1])) + ') that does not exist in fuelrod ' + id)
+                            sys.exit()
+                        i = int(s['value'][1]-1)
+                        # r-average temperature and volume
+                        tavg, vol = 0.0, 0.0
+                        for j in range(reactor.solid.fuelrod[indx].fuel[i].nr):
+                            tavg += reactor.solid.fuelrod[indx].fuel[i].temp[j] * reactor.solid.fuelrod[indx].fuel[i].vol[j]
+                            vol += reactor.solid.fuelrod[indx].fuel[i].vol[j]
+                        tavg /= vol
+                        self.signal[s['id']] = tavg
+                    else:
+                        if s['value'][1] > reactor.solid.fuelrod[indx].nz:
+                            print('****ERROR: \'signal\' card ' + s['id'] + ' refers to axial layer (' + str(int(s['value'][1])) + ') that does not exist in fuelrod ' + id)
+                            sys.exit()
+                        i = int(s['value'][1]-1)
+                        if s['value'][2] > reactor.solid.fuelrod[indx].fuel[i].nr:
+                            print('****ERROR: \'signal\' card ' + s['id'] + ' refers to radial (' + str(int(s['value'][2])) + ') that does not exist in fuel of fuelrod ' + id)
+                            sys.exit()
+                        j = int(s['value'][2]-1)
+                        # node temperature
+                        self.signal[s['id']] = reactor.solid.fuelrod[indx].fuel[int(s['value'][1])-1].temp[j]
+                else:
+                    print('****ERROR: \'signal\' card ' + s['id'] + ' refers to fuel rod (' + id + ') that does not exist or there is no \'solve fuelrod\' card.')
+                    sys.exit()
+
+            # time: time
+            elif s['type'] == 'time':
+                self.signal[s['id']] = t
 
         # signal-dependent junction: impose flowrate
         if 'fluid' in reactor.solve:
             k = 0
             for j in range(reactor.fluid.njun):
                 if reactor.fluid.juntype[j] == 'independent':
-                    if reactor.fluid.junflowrate[j] != '':
+                    f = reactor.fluid.f[j][0]
+                    t = reactor.fluid.t[j][0]
+                    # tuple of from-to pipe id's
+                    f_t = (reactor.fluid.pipeid[f],reactor.fluid.pipeid[t])
+                    try:
+                        # check if the current junction j is present in junflowrate list
+                        indx = reactor.fluid.junflowrate['jun'].index(f_t)
                         # impose flowrate from the look-up table
-                        reactor.fluid.mdoti[k] = self.signal[reactor.fluid.junflowrate[j]]
+                        reactor.fluid.mdoti[k] = self.signal[reactor.fluid.junflowrate['flowrate'][indx]]
+                    except ValueError:
+                        pass
                     k += 1
-        
+
         # signal-dependent pipe: impose temperature
         if 'fluid' in reactor.solve:
             for i in range(reactor.fluid.npipe):
                 if reactor.fluid.pipetype[i] == 'normal' and reactor.fluid.signaltemp[i] != '':
                     # impose temperature from the look-up table
                     reactor.fluid.temp[i] = [self.signal[reactor.fluid.signaltemp[i]]] * reactor.fluid.pipennodes[i]
-
-        # signals requiring symbolic evaluations
-        for s in self.input['signal']:
-            # merge card values
-            value = ''.join([str(x) for x in s['value']])
-            # only for signals requiring symbolic evaluations
-            if any([char in value for char in ['+', '-', '*', '/']]):
-                try:
-                    self.signal[s['id']] = sympify(value)
-                except:
-                    print('****ERROR: \'signal\' card ' + s['id'] + ' contains a syntax error.')
-                    sys.exit()
-                for id in list(self.signal.keys()):
-                    if id in value:
-                        self.signal[s['id']] = self.signal[s['id']].subs(sympify(id),self.signal[id])
-                try:
-                    self.signal[s['id']] = float(self.signal[s['id']])
-                except:
-                    print('****ERROR: \'signal\' card ' + s['id'] + ' most likely contains a not-defined signal.')
-                    sys.exit()
-
     #----------------------------------------------------------------------------------------------
     def construct_input(self):
         #create dictionary inp where all input data will be stored
         inp = {}
+        inp['boolean'] = []
         inp['clad'] = []
         inp['coregeom'] = {'geometry':'', 'pitch':0, 'botBC':'', 'topBC':''}
         inp['coremap'] = []
         inp['fuel'] = []
         inp['fuelrod'] = []
         inp['innergas'] = []
-        inp['junction'] = {'from':[], 'to':[], 'type':[], 'pumphead':[], 'flowrate':[]}
+        inp['junction'] = {'from':[], 'to':[], 'type':[]}
+        inp['junpumphead'] = {'jun':[], 'pumphead':[]}
+        inp['junflowrate'] = {'jun':[], 'flowrate':[]}
+        inp['junkfac'] = {'jun':[], 'kfac':[]}
         inp['lookup'] = []
         inp['mat'] = []
         inp['mix'] = []
@@ -239,8 +295,8 @@ class Control:
         inp['stack'] = []
         inp['htstr'] = []
         inp['t0'] = 0
-        inp['t_dt'] = []
-        inp['tol'] = (1.e-6,1e-6)
+        inp['tend'] = []
+        inp['tol'] = (1e-6,1e-6)
         inp['thermbc'] = []
     
         #read input file as a whole
@@ -278,7 +334,7 @@ class Control:
             word = line.split()
             word = list(map(convert_to_float, word))
             if len(word) > 0:
-                
+
                 key = word[0].lower()
                 #--------------------------------------------------------------------------------------
                 # just placeholder
@@ -289,9 +345,19 @@ class Control:
                 elif key == 'betaeff':
                     inp['betaeff'] = word[1:]
                 #--------------------------------------------------------------------------------------
+                # boolean signal
+                elif key == 'boolean':
+                    if len(word)-1 < 4:
+                        print('****ERROR: boolean card should have four values after the keyword: boolean signal id, first signal id, boolean operator(eq, ne, gt, ge, lt, le), second signal id.')
+                        sys.exit()
+                    if word[3] not in ['eq', 'ne', 'gt', 'ge', 'lt', 'le']:
+                        print('****ERROR: wrong operator in boolean card', word[3], '. Possible options are: eq, ne, gt, ge, lt, le.')
+                        sys.exit()
+                    inp['boolean'].append({'sigid':word[1],'sigid1':word[2],'operator':word[3],'sigid2':word[4]})
+                #--------------------------------------------------------------------------------------
                 # cladding
                 elif key == 'clad':
-                     inp['clad'].append( {'id':word[1], 'matid':word[2], 'ri':word[3], 'ro':word[4], 'nr':int(word[5])} )
+                    inp['clad'].append( {'id':word[1], 'matid':word[2], 'ri':word[3], 'ro':word[4], 'nr':int(word[5])} )
                 #--------------------------------------------------------------------------------------
                 # core geometry
                 elif key == 'coregeom':
@@ -334,7 +400,7 @@ class Control:
                 #--------------------------------------------------------------------------------------
                 # fuel
                 elif key == 'fuel':
-                     inp['fuel'].append( {'id':word[1], 'matid':word[2], 'ri':float(word[3]), 'ro':float(word[4]), 'nr':int(word[5])} )
+                    inp['fuel'].append( {'id':word[1], 'matid':word[2], 'ri':float(word[3]), 'ro':float(word[4]), 'nr':int(word[5])} )
                 #--------------------------------------------------------------------------------------
                 # fuel rod card
                 elif key == 'fuelrod':
@@ -360,39 +426,46 @@ class Control:
                 #--------------------------------------------------------------------------------------
                 # inner gas
                 elif key == 'innergas':
-                     inp['innergas'].append( {'fuelrodid':word[1], 'matid':word[2], 'plenv':word[3]} )
+                    inp['innergas'].append( {'fuelrodid':word[1], 'matid':word[2], 'plenv':word[3]} )
                 #--------------------------------------------------------------------------------------
                 # thermal-hydraulic junction (dependent)
                 elif key == 'jun':
-                     inp['junction']['from'].append(word[1])
-                     inp['junction']['to'].append(word[2])
-                     inp['junction']['type'].append('dependent')
-                     inp['junction']['pumphead'].append('')
-                     inp['junction']['flowrate'].append('')
+                    inp['junction']['from'].append(word[1])
+                    inp['junction']['to'].append(word[2])
+                    inp['junction']['type'].append('dependent')
                 #--------------------------------------------------------------------------------------
                 # thermal-hydraulic junction (independent)
                 elif key == 'jun-i':
-                     inp['junction']['from'].append(word[1])
-                     inp['junction']['to'].append(word[2])
-                     inp['junction']['type'].append('independent')
-                     inp['junction']['pumphead'].append('')
-                     inp['junction']['flowrate'].append('')
+                    inp['junction']['from'].append(word[1])
+                    inp['junction']['to'].append(word[2])
+                    inp['junction']['type'].append('independent')
                 #--------------------------------------------------------------------------------------
                 # thermal-hydraulic junction (independent + signal for flowrate)
                 elif key == 'jun-i-f':
-                     inp['junction']['from'].append(word[1])
-                     inp['junction']['to'].append(word[2])
-                     inp['junction']['type'].append('independent')
-                     inp['junction']['pumphead'].append('')
-                     inp['junction']['flowrate'].append(word[3])
+                    inp['junction']['from'].append(word[1])
+                    inp['junction']['to'].append(word[2])
+                    inp['junction']['type'].append('independent')
+                    inp['junflowrate']['jun'].append((word[1],word[2]))
+                    inp['junflowrate']['flowrate'].append(word[3])
                 #--------------------------------------------------------------------------------------
                 # thermal-hydraulic junction (independent + signal for pump head)
                 elif key == 'jun-i-p':
-                     inp['junction']['from'].append(word[1])
-                     inp['junction']['to'].append(word[2])
-                     inp['junction']['type'].append('independent')
-                     inp['junction']['pumphead'].append(word[3])
-                     inp['junction']['flowrate'].append('')
+                    inp['junction']['from'].append(word[1])
+                    inp['junction']['to'].append(word[2])
+                    inp['junction']['type'].append('independent')
+                    inp['junpumphead']['jun'].append((word[1],word[2]))
+                    inp['junpumphead']['pumphead'].append(word[3])
+                #--------------------------------------------------------------------------------------
+                # k-factor at thermal-hydraulic junction
+                elif key == 'jun-kfac':
+                    try:
+                        # make list of tuples (from,to) and find index of the (word[1],word[2]) tuple 
+                        j = list(zip(inp['junction']['from'],inp['junction']['to'])).index((word[1],word[2]))
+                    except ValueError:
+                        print('****ERROR: from and to of \'jun-kfac\' card (word 3) are not specified in any junction card (should appear before): ', word[1], word[2])
+                        sys.exit()
+                    inp['junkfac']['jun'].append((word[1],word[2]))
+                    inp['junkfac']['kfac'].append(word[3])
                 #--------------------------------------------------------------------------------------
                 # lookup table
                 elif key == 'lookup':
@@ -450,10 +523,10 @@ class Control:
                 #--------------------------------------------------------------------------------------
                 # signal variable
                 elif key == 'signal':
-                    if len(word) == 2:
+                    if len(word) < 3:
                         print('****ERROR: \'signal\' card should have at least 3 words.')
                         sys.exit()
-                    inp['signal'].append( {'id':word[1], 'value':word[2:]} )
+                    inp['signal'].append( {'id':word[1], 'type':word[2], 'value':word[3:]} )
                 #--------------------------------------------------------------------------------------
                 # models to be solved
                 elif key == 'solve':
@@ -509,8 +582,8 @@ class Control:
                     inp['t0'] = word[1]
                 #--------------------------------------------------------------------------------------
                 # end of time interval and output time step for this interval
-                elif key == 't_dt':
-                    inp['t_dt'].append([word[1], word[2]])
+                elif key == 'tend':
+                    inp['tend'].append(word[1])
                 #--------------------------------------------------------------------------------------
                 # thermal boundary conditions]
                 elif key == 'thermbc':
@@ -553,10 +626,10 @@ class Control:
                 # tolerances (relative and absolute)
                 elif key == 'tol':
                     inp['tol'] = (word[1],word[2])
-    
-        # verify that t_dt present
-        if inp['t_dt'] == []:
-            sys.exit('****ERROR: obligatory card t_dt specifying time_end and dtime_out is absent.')
+
+        # verify that tout present
+        if inp['tend'] == []:
+            sys.exit('****ERROR: obligatory card tend specifying time_end is absent.')
             sys.exit()
     
         # verify that there is at least one solve card
@@ -578,7 +651,16 @@ class Control:
                 sys.exit()
         # append output signals of lookup tables
         inp['signalid'] += [y['f(x)'][0] for y in inp['lookup']]
-    
+        # append boolean signals
+        inp['signalid'] += [x['sigid'] for x in inp['boolean']]
+        # verify that boolean signals use existing signals
+        for x in inp['boolean']:
+            if x['sigid1'] not in inp['signalid'] and not isinstance(x['sigid1'], float) and not isinstance(x['sigid1'], int):
+                print('****ERROR: firts signal ' + x['sigid1'] + ' in boolean card is not defined.')
+                sys.exit()
+            if x['sigid2'] not in inp['signalid'] and not isinstance(x['sigid2'], float) and not isinstance(x['sigid2'], int):
+                print('****ERROR: second signal ' + x['sigid2'] + ' in boolean card is not defined.')
+                sys.exit()   
         # verify that mix card uses existing signals
         for s in [x['signaltemp'][j] for x in inp['mix'] for j in range(len(x['signaltemp']))]:
             if s not in inp['signalid']:
@@ -608,7 +690,7 @@ class Control:
         fid = []
         if 'signal' in self.input:
             fid.append(open(path4results + os.sep + 'signal.dat', 'w'))
-            fid[-1].write(' ' + 'time(s)'.ljust(13) + ''.join( [(self.input['signal'][j]['id']).ljust(13) for j in range(len(self.input['signal']))] + [table['f(x)'][0].ljust(13) for table in self.input['lookup']] ) + '\n')
+            fid[-1].write(' ' + 'time(s)'.ljust(13) + ''.join( [(self.input['signal'][j]['id']).ljust(13) for j in range(len(self.input['signal']))] + [table['f(x)'][0].ljust(13) for table in self.input['lookup']] + [x['sigid'].ljust(13) for x in self.input['boolean']] ) + '\n')
         if 'fluid' in reactor.solve:
             fid.append(open(path4results + os.sep + 'fluid-mdot.dat', 'w'))
             fid[-1].write(' ' + 'time(s)'.ljust(13) + ''.join([(self.input['junction']['from'][j] +'-' + self.input['junction']['to'][j]).ljust(13) for j in range(reactor.fluid.njuni + reactor.fluid.njund)]) + '\n')
@@ -679,6 +761,8 @@ class Control:
     #----------------------------------------------------------------------------------------------
     def print_output_files(self, reactor, fid, time, flag):
 
+        iz, ix, iy, it, ig, idnp = 5, 5, 5, 0, 1, 0
+        print('time(s): ' + '{0:12.5e} '.format(time) + 'flux(-): ' + '{0:12.5e} '.format(reactor.core.flux[iz][ix][iy][it][ig]) + 'dfidt(-): ' + '{0:12.5e} '.format(reactor.core.dfidt[iz][ix][iy][it][ig]) + 'dcdnpdt(-): ' + '{0:12.5e} '.format(reactor.core.dcdnpdt[iz][ix][iy][it][idnp]))
         # print output files
         indx = 0
         if 'signal' in self.input:
@@ -791,6 +875,8 @@ class Control:
                             fid[indx].write(' ' + str(s[0][0]+1).ljust(13) + str(s[0][1]+1).ljust(12) + '{0:12.5e} '.format(s[1]) + '\n')
                     indx += 1
                     reactor.core.iso[i].print_xs = False
+                else:
+                    indx += 1
             for i in range(reactor.core.nmix):
                 if reactor.core.mix[i].print_xs:
                     fid[indx].write('time: ' + '{0:12.5e} '.format(time) + ' s\n')
@@ -832,37 +918,38 @@ class Control:
                     reactor.core.mix[i].print_xs = False
 
                 else:
-                    indx += 7
+                    indx += 1
             # multiplication factor
-            if flag == 0 : fid[indx].write(''.join([(' '+str(niter)).ljust(13) + '{0:12.5e} '.format(reactor.core.k[niter]) + '\n' for niter in range(len(reactor.core.k))]))
+            #if flag == 0 : 
+            fid[indx].write(''.join([(' '+str(niter)).ljust(13) + '{0:12.5e} '.format(reactor.core.keff[niter]) + '\n' for niter in range(len(reactor.core.keff))]))
             indx += 1
             # neutron flux
-            if flag == 0 : 
-                for iz in range(reactor.core.nz):
-                    for ix in range(reactor.core.nx):
-                        for iy in range(reactor.core.ny):
-                            imix = reactor.core.map['imix'][iz][ix][iy]
-                            # if (iz, ix, iy) is not a boundary condition node, i.e. not -1 (vac) and not -2 (ref')
-                            if imix >= 0:
-                                for ig in range(reactor.core.ng):
-                                    flux = sum([reactor.core.flux[iz][ix][iy][it][ig] for it in range(reactor.core.nt)])
-                                    fid[indx].write('{0:12.5e} '.format(time) + ' ' + str(ig+1).ljust(13) + str(iz).ljust(13) + str(ix).ljust(13) + str(iy).ljust(12) + '{0:12.5e} '.format(flux) + '\n')
-            indx += 1
-            # power
-            if flag == 0 : 
-                for iz in range(reactor.core.nz):
-                    for ix in range(reactor.core.nx):
-                        for iy in range(reactor.core.ny):
-                            imix = reactor.core.map['imix'][iz][ix][iy]
-                            # if (iy, ix, iz) is not a boundary condition node, i.e. not -1 (vac) and not -2 (ref')
-                            if imix >= 0 and reactor.core.pow[iz][ix][iy] > 0:
-                                fid[indx].write('{0:12.5e} '.format(time) + ' ' + str(iz).ljust(13) + str(ix).ljust(13) + str(iy).ljust(12) + '{0:12.5e} '.format(reactor.core.pow[iz][ix][iy]) + '\n')
-            indx += 1
-            if flag == 0 : 
+            #if flag == 0 : 
+            for iz in range(reactor.core.nz):
                 for ix in range(reactor.core.nx):
                     for iy in range(reactor.core.ny):
-                        if reactor.core.powxy[ix][iy] > 0:
-                            fid[indx].write('{0:12.5e} '.format(time) + ' ' + str(ix).ljust(13) + str(iy).ljust(12) + '{0:12.5e} '.format(reactor.core.powxy[ix][iy]) + '\n')
+                        imix = reactor.core.map['imix'][iz][ix][iy]
+                        # if (iz, ix, iy) is not a boundary condition node, i.e. not -1 (vac) and not -2 (ref')
+                        if imix >= 0:
+                            for ig in range(reactor.core.ng):
+                                flux = sum([reactor.core.flux[iz][ix][iy][it][ig] for it in range(reactor.core.nt)])
+                                fid[indx].write('{0:12.5e} '.format(time) + ' ' + str(ig+1).ljust(13) + str(iz).ljust(13) + str(ix).ljust(13) + str(iy).ljust(12) + '{0:12.5e} '.format(flux) + '\n')
+            indx += 1
+            # power
+            #if flag == 0 : 
+            for iz in range(reactor.core.nz):
+                for ix in range(reactor.core.nx):
+                    for iy in range(reactor.core.ny):
+                        imix = reactor.core.map['imix'][iz][ix][iy]
+                        # if (iy, ix, iz) is not a boundary condition node, i.e. not -1 (vac) and not -2 (ref')
+                        if imix >= 0 and reactor.core.pow[iz][ix][iy] > 0:
+                            fid[indx].write('{0:12.5e} '.format(time) + ' ' + str(iz).ljust(13) + str(ix).ljust(13) + str(iy).ljust(12) + '{0:12.5e} '.format(reactor.core.pow[iz][ix][iy]) + '\n')
+            indx += 1
+            #if flag == 0 : 
+            for ix in range(reactor.core.nx):
+                for iy in range(reactor.core.ny):
+                    if reactor.core.powxy[ix][iy] > 0:
+                        fid[indx].write('{0:12.5e} '.format(time) + ' ' + str(ix).ljust(13) + str(iy).ljust(12) + '{0:12.5e} '.format(reactor.core.powxy[ix][iy]) + '\n')
             indx += 1
 
     #----------------------------------------------------------------------------------------------
@@ -924,15 +1011,24 @@ class Control:
             for i in range(reactor.core.ndnp):
                 y.append(reactor.core.cdnp[i])
         if 'spatialkinetics' in reactor.solve:
-            for iz in range(self.nz):
-                for ix in range(self.nx):
-                    for iy in range(self.ny):
+            for iz in range(reactor.core.nz):
+                for ix in range(reactor.core.nx):
+                    for iy in range(reactor.core.ny):
                         # if (iy, ix, iz) is not a boundary condition node, i.e. not -1 (vac) and not -2 (ref)
-                        imix = self.map['imix'][iz][ix][iy]
-                        if imix >= 0 and any(self.mix[imix].sigf) > 0:
-                            for it in range(self.nt):
-                                for ig in range(self.ng):
-                                    y.append(self.flux[iz][ix][iy][it][ig])
+                        imix = reactor.core.map['imix'][iz][ix][iy]
+                        if imix >= 0 and any(reactor.core.mix[imix].sigf) > 0:
+                            for it in range(reactor.core.nt):
+                                for ig in range(reactor.core.ng):
+                                    y.append(reactor.core.flux[iz][ix][iy][it][ig])
+            for iz in range(reactor.core.nz):
+                for ix in range(reactor.core.nx):
+                    for iy in range(reactor.core.ny):
+                        # if (iy, ix, iz) is not a boundary condition node, i.e. not -1 (vac) and not -2 (ref)
+                        imix = reactor.core.map['imix'][iz][ix][iy]
+                        if imix >= 0:
+                            for it in range(reactor.core.nt):
+                                for im in range(reactor.core.ndnp):
+                                    y.append(reactor.core.cdnp[iz][ix][iy][it][im])
         return y
 
     #----------------------------------------------------------------------------------------------
@@ -944,7 +1040,16 @@ class Control:
             k = 0
             for j in range(reactor.fluid.njun):
                 if reactor.fluid.juntype[j] == 'independent':
-                    if reactor.fluid.junflowrate[j] == '':
+                    f = reactor.fluid.f[j][0]
+                    t = reactor.fluid.t[j][0]
+                    # tuple of from-to pipe id's
+                    f_t = (reactor.fluid.pipeid[f],reactor.fluid.pipeid[t])
+                    try:
+                        # check if the current junction j is present in junflowrate list
+                        reactor.fluid.junflowrate['jun'].index(f_t)
+                        # if yes...
+                        pass
+                    except ValueError:
                         # flowrate in independent junctions
                         reactor.fluid.mdoti[k] = y[indx]
                     k += 1
@@ -1009,13 +1114,23 @@ class Control:
                 reactor.core.cdnp[i] = y[indx]
                 indx += 1
         if 'spatialkinetics' in reactor.solve:
-            for iz in range(self.nz):
-                for ix in range(self.nx):
-                    for iy in range(self.ny):
+            for iz in range(reactor.core.nz):
+                for ix in range(reactor.core.nx):
+                    for iy in range(reactor.core.ny):
                         # if (iy, ix, iz) is not a boundary condition node, i.e. not -1 (vac) and not -2 (ref)
-                        imix = self.map['imix'][iz][ix][iy]
-                        if imix >= 0 and any(self.mix[imix].sigf) > 0:
-                            for it in range(self.nt):
-                                for ig in range(self.ng):
-                                    self.flux[iz][ix][iy][it][ig] = y[indx]
+                        imix = reactor.core.map['imix'][iz][ix][iy]
+                        if imix >= 0 and any(reactor.core.mix[imix].sigf) > 0:
+                            for it in range(reactor.core.nt):
+                                for ig in range(reactor.core.ng):
+                                    reactor.core.flux[iz][ix][iy][it][ig] = y[indx]
+                                    indx += 1
+            for iz in range(reactor.core.nz):
+                for ix in range(reactor.core.nx):
+                    for iy in range(reactor.core.ny):
+                        # if (iy, ix, iz) is not a boundary condition node, i.e. not -1 (vac) and not -2 (ref)
+                        imix = reactor.core.map['imix'][iz][ix][iy]
+                        if imix >= 0:
+                            for it in range(reactor.core.nt):
+                                for im in range(reactor.core.ndnp):
+                                    reactor.core.cdnp[iz][ix][iy][it][im] = y[indx]
                                     indx += 1

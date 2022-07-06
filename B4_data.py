@@ -39,7 +39,32 @@ class Data:
             # Based on fit from J.K. Fink, et. al."Properties for Reactor Safety Analysis", ANL-CEN-RSD-82-2, May 1982.
             cpl = 1646.97 - 0.831587*t + 4.31182e-04*t**2
             return {'rhol':rhol, 'visl':visl, 'kl':kl, 'cpl':cpl}
-
+        # lbe: liquid lead and bismuth (55%wt Bi, 45%wt Pb)
+        elif inp['type'] == 'lbe':
+            t = inp['t']
+            # OECD, Nuclear Energy Agency, Handbook on Lead-bismuth Eutectic Alloy and Lead Properties, Materials Compatibility, Thermalhydraulics and Technologies, OECD, 2015. https://doi.org/10.1787/42dcd531-en.
+            # density (kg/m3): @400K-1300K equation from "Handbook on Lead-bismuth Eutectic Alloy and Lead Properties", p.130
+            rhol = 11065-1.293*t
+            # dynamic viscosity (Pa·s): @400K-1200K equation from "Handbook on Lead-bismuth Eutectic Alloy and Lead Properties", p.130
+            visl = 4.94e-4*math.exp(754.1/t)
+            # specific heat (J/kg-K): @400K-1100K equation from "Handbook on Lead-bismuth Eutectic Alloy and Lead Properties", p.130
+            cpl = 164.8-3.94e-2*t+1.25e-5*t*t-4.56e5/t/t
+            # thermal conductivity (W/m-K): @400K-1300K equation from "Handbook on Lead-bismuth Eutectic Alloy and Lead Properties", p.130
+            kl = 3.284 + 1.617e-2*t-2.305e-6*t*t
+            return {'rhol':rhol, 'visl':visl, 'kl':kl, 'cpl':cpl}
+        # pb: liquid Pb
+        elif inp['type'] == 'pb':
+            t = inp['t']
+            # OECD, Nuclear Energy Agency, Handbook on Lead-bismuth Eutectic Alloy and Lead Properties, Materials Compatibility, Thermalhydraulics and Technologies, OECD, 2015. https://doi.org/10.1787/42dcd531-en.
+            # density (kg/m3): @601K-1900K equation from "Handbook on Lead-bismuth Eutectic Alloy and Lead Properties", p.129
+            rhol = 11441-1.2795*t
+            # dynamic viscosity (Pa·s): @601K-1500K equation from "Handbook on Lead-bismuth Eutectic Alloy and Lead Properties", p.1329
+            visl = 4.55e-4*math.exp(1069/t)
+            # specific heat (J/kg-K): @400K-1300K equation from "Handbook on Lead-bismuth Eutectic Alloy and Lead Properties", p.129
+            cpl = 176.2-4.923e-2*t+1.544e-5*t*t-1.524e6/t/t
+            # thermal conductivity (W/m-K): @400K-1300K equation from "Handbook on Lead-bismuth Eutectic Alloy and Lead Properties", p.129
+            kl = 9.2 + 0.011*t
+            return {'rhol':rhol, 'visl':visl, 'kl':kl, 'cpl':cpl}
         # ss316: stainless steel type of 316
         elif inp['type'] == 'ss316':
             t = inp['t']

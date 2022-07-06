@@ -47,13 +47,13 @@ class Reactor:
         # create object solid
         self.solid = Solid(self)
 
-        # evaluate signals
-        self.control.evaluate_signals(self, self.control.input['t0'])
-
         # create object core
         self.core = Core(self)
         # create object data
         self.data = Data(self)
+
+        # evaluate signals
+        self.control.evaluate_signals(self, self.control.input['t0'])
 
         # write list of unknowns from self to y0
         y0 = self.control.write_to_y(self)
@@ -82,22 +82,23 @@ class Reactor:
         self.control.print_output_files(self, fid, t0, 0)
 
         # create ODE solver, initialize and set integrator
-        solver = ode(compose_rhs, jac = None).set_integrator('lsoda', method = 'bdf', rtol = self.control.input['tol'][0], atol = self.control.input['tol'][1])
+        solver = ode(compose_rhs, jac = None).set_integrator('vode', method = 'bdf', rtol = self.control.input['tol'][0], atol = self.control.input['tol'][1])
         solver.set_initial_value(y0, t0)
-        solver.set_integrator
+        #solver.set_integrator
 
         # main integration loop
-        for t_dt in self.control.input['t_dt'] :
-            tend = t_dt[0]
-            dtout = t_dt[1]
-            # solve the whole system of ODEs
+        dtout = 1e-6
+        for tend in self.control.input['tend'] :
             while solver.successful() and solver.t < tend:
-                t = solver.t + dtout
-                print(t)
+                t = min(tend, solver.t + dtout)
                 y = solver.integrate(t)
-
+                # next step recommended by the solver
+                dtout = solver._integrator.rwork[11]
+            
+                # evaluate signals            
+                self.control.evaluate_signals(self, t)
                 # print to output files
-                self.control.print_output_files(self, fid, t, 1)
+                self.control.print_output_files(self, fid, t, 0)
 
         # close all output files
         for f in fid:
